@@ -1,39 +1,50 @@
-ARG BASE_IMAGE=arm32v6/alpine:latest
+FROM centos:8 AS builder
 
-FROM $BASE_IMAGE AS builder
+RUN \
+        dnf -y install epel-release dnf-plugins-core && \
+        dnf config-manager --set-enabled PowerTools
 
-RUN apk add \
-        automake \
+RUN dnf -y install \
         autoconf \
+        automake \
         cargo \
-        curl \
-        elfutils-dev \
-        file-dev \
+        file \
+        file-devel \
         gcc \
+        gcc-c++ \
         git \
-        hiredis-dev \
-        jansson-dev \
-        libpcap-dev \
-        libelf \
-        libbpf-dev \
-        libnetfilter_queue-dev \
-        libnetfilter_log-dev \
+        hiredis-devel \
+        hyperscan-devel \
+        jansson-devel \
+        jq \
+        lua-devel \
         libtool \
-        linux-headers \
-        libcap-ng-dev \
+        libyaml-devel \
+        libnfnetlink-devel \
+        libnetfilter_queue-devel \
+        libnet-devel \
+        libcap-ng-devel \
+        libevent-devel \
+        libmaxminddb-devel \
+        libpcap-devel \
+        libprelude-devel \
+        libtool \
+        lz4-devel \
         make \
-        musl-dev \
-        nss-dev \
-        pcre-dev \
-        python3 \
-        py3-yaml \
+        nspr-devel \
+        nss-devel \
+        nss-softokn-devel \
+        pcre-devel \
+        pkgconfig \
+        python3-devel \
+        python3-yaml \
         rust \
-        yaml-dev \
-        zlib-dev
+        which \
+        zlib-devel
 
 WORKDIR /src
 
-ARG VERSION
+ARG VERSION=6.0.0-rc1
 RUN curl -OL https://www.openinfosecfoundation.org/download/suricata-${VERSION}.tar.gz
 RUN tar zxf suricata-${VERSION}.tar.gz
 
@@ -41,13 +52,9 @@ WORKDIR /src/suricata-${VERSION}
 
 RUN ./configure \
         --prefix=/usr \
-        --sysconfdir=/etc \
-        --localstatedir=/var \
         --disable-shared \
         --disable-gccmarch-native \
-        --enable-ebpf \
-        --enable-nfqueue \
-        --enable-hiredis
+        --enable-lua
 
 ARG CORES=2
 
@@ -59,30 +66,45 @@ RUN make install install-conf DESTDIR=/fakeroot
 # next stage.
 RUN rm -rf /fakeroot/var
 
-FROM $BASE_IMAGE AS runner
-
-RUN apk add \
+FROM centos:8 AS runner
+RUN \
+        dnf -y update && \
+        dnf -y install epel-release && \
+        dnf -y install \
+        file \
+        findutils \
         hiredis \
+        hyperscan \
+        iproute \
         jansson \
-        libcap \
-        libcap-ng \
-        libpcap \
-        libelf \
-        libbpf \
+        lua-libs \
+        libyaml \
+        libnfnetlink \
         libnetfilter_queue \
-        libnetfilter_log \
-        libmagic \
+        libnet \
+        libcap-ng \
+        libevent \
+        libmaxminddb \
+        libpcap \
+        libprelude \
+        logrotate \
+        lz4 \
+        net-tools \
         nss \
+        nss-softokn \
         pcre \
-        py3-yaml \
+        procps-ng \
         python3 \
-        yaml \
-        zlib
+        python3-yaml \
+        tcpdump \
+        which \
+        zlib && \
+        dnf clean all
 
 COPY --from=builder /fakeroot /
 
 # Create the directories that didn't get coped from the previous stage.
-RUN mkdir -p /var/log/suricata /var/run/suricata
+RUN mkdir -p /var/log/suricata /var/run/suricata /var/lib/suricata
 
 COPY /update.yaml /etc/suricata/update.yaml
 COPY /suricata.logrotate /etc/logrotate.d/suricata
@@ -92,8 +114,7 @@ RUN suricata-update update-sources && \
         suricata-update --no-test --no-reload && \
         /usr/bin/suricata -V
 
-RUN addgroup suricata && \
-        adduser -S -G suricata suricata && \
+RUN useradd --system --create-home suricata && \
         chown -R suricata:suricata /etc/suricata && \
         chown -R suricata:suricata /var/log/suricata && \
         chown -R suricata:suricata /var/lib/suricata && \
@@ -104,9 +125,6 @@ RUN addgroup suricata && \
 VOLUME /var/log/suricata
 VOLUME /var/lib/suricata
 VOLUME /etc/suricata
-
-ARG BUILD_DATE
-RUN echo "${BUILD_DATE}" > /etc/build_date
 
 COPY /docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
